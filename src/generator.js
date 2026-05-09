@@ -37,6 +37,7 @@ COPY package*.json ./
 RUN npm install
 COPY . .
 RUN npm run build
+EXPOSE 3000
 CMD ["npm", "start"]`,
 
   'react-vite': `FROM node:20-alpine AS builder
@@ -91,16 +92,40 @@ COPY . .
 CMD ["node", "index.js"]`,
 };
 
-function generateFiles(projectInfo, projectPath = process.cwd()) {
-  const { type, port } = projectInfo;
-  const name = path.basename(projectPath);
-  const dockerfile = dockerfiles[type] || dockerfiles.unknown;
+function detectEntrypoint(projectPath) {
+  const candidates = ['index.js', 'app.js', 'server.js', 'src/index.js', 'src/app.js'];
+  for (const file of candidates) {
+    if (fs.existsSync(path.join(projectPath, file))) return file;
+  }
+  return 'index.js';
+}
 
-  // Dockerfile avec EXPOSE dynamique
-  fs.writeFileSync(
-    path.join(projectPath, 'Dockerfile'),
-    dockerfile + `\nEXPOSE ${port}`
-  );
+function generateFiles(projectInfo, projectPath = process.cwd()) {
+  let { type, port } = projectInfo;
+  const name = path.basename(projectPath);
+
+  // React Vite = toujours nginx sur port 80 en production
+  if (type === 'react-vite') port = 80;
+
+  // Next.js = toujours port 3000
+  if (type === 'nextjs') port = 3000;
+
+  let dockerfile = dockerfiles[type] || dockerfiles.unknown;
+
+  // Express/Node: détecter le vrai fichier d'entrée
+  if (type === 'express' || type === 'node' || type === 'unknown') {
+    const entrypoint = detectEntrypoint(projectPath);
+    dockerfile = dockerfile.replace('CMD ["node", "index.js"]', `CMD ["node", "${entrypoint}"]`);
+    dockerfile += `\nEXPOSE ${port}`;
+  } else if (type === 'react-vite') {
+    // Dockerfile react-vite a déjà EXPOSE 80
+  } else if (type === 'nextjs') {
+    // Dockerfile nextjs a déjà EXPOSE 3000
+  } else {
+    dockerfile += `\nEXPOSE ${port}`;
+  }
+
+  fs.writeFileSync(path.join(projectPath, 'Dockerfile'), dockerfile);
 
   // docker-compose.yml selon le type
   let compose = '';
@@ -126,7 +151,6 @@ function generateFiles(projectInfo, projectPath = process.cwd()) {
 
   fs.writeFileSync(path.join(projectPath, 'docker-compose.yml'), compose);
 
-  // .dockerignore
   fs.writeFileSync(path.join(projectPath, '.dockerignore'),
     `node_modules\n.git\n.env\ndist\nbuild\n*.log\n.DS_Store`
   );
