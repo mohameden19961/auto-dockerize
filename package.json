@@ -1,0 +1,18 @@
+{
+  "name": "@mohameden19961/auto-dockerize",
+  "version": "1.0.0",
+  "description": "Auto-dockerize any project automatically",
+  "main": "src/detector.js",
+  "bin": {
+    "dockerize": "./bin/dockerize.js"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": ["docker", "dockerize", "cli", "devops"],
+  "author": "mohameden19961",
+  "license": "ISC",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  }
+}
