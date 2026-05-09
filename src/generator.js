@@ -1,32 +1,12 @@
 const fs = require('fs');
 const path = require('path');
 
-function getHostPort(port) {
-  // Ports bloqués par les navigateurs: 10080, 10443, etc.
-  // On utilise la plage 8000-9000 pour les frontends
-  const safePorts = {
-    80: 8080,    // react-vite nginx
-    3000: 13000, // nextjs
-    5173: 15173, // vite dev (non utilisé en prod)
-  };
-  return safePorts[port] || (10000 + port);
-}
-
-function getCompose(name, port, extraEnv = '', dbService = '') {
-  const hostPort = getHostPort(port);
-  return `services:
-  ${name}:
-    build: .
-    ports:
-      - "${hostPort}:${port}"
-    ${extraEnv}${dbService ? `depends_on:\n      - db\n    restart: unless-stopped\n${dbService}` : 'restart: unless-stopped'}`;
-}
-
-const dbService = `
+const dbServices = {
+  mysql: (dbPort) => `
   db:
     image: mysql:8
     ports:
-      - "13306:3306"
+      - "${dbPort}:3306"
     environment:
       - MYSQL_ROOT_PASSWORD=root
       - MYSQL_DATABASE=appdb
@@ -35,7 +15,24 @@ const dbService = `
     restart: unless-stopped
 
 volumes:
-  db_data:`;
+  db_data:`,
+
+  postgres: (dbPort) => `
+  db:
+    image: postgres:16-alpine
+    ports:
+      - "${dbPort}:5432"
+    environment:
+      - POSTGRES_USER=root
+      - POSTGRES_PASSWORD=root
+      - POSTGRES_DB=appdb
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  db_data:`,
+};
 
 const dockerfiles = {
   nextjs: `FROM node:20-alpine
@@ -56,6 +53,18 @@ RUN npm run build
 
 FROM nginx:alpine
 COPY --from=builder /app/dist /usr/share/nginx/html
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]`,
+
+  angular: `FROM node:20-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
+COPY . .
+RUN npm run build --prod
+
+FROM nginx:alpine
+COPY --from=builder /app/dist/*/browser /usr/share/nginx/html
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]`,
 
@@ -107,60 +116,123 @@ function detectEntrypoint(projectPath) {
   return 'index.js';
 }
 
-function generateFiles(projectInfo, projectPath = process.cwd()) {
-  let { type, port } = projectInfo;
+function detectDbType(projectPath) {
+  // package.json
+  const pkgPath = path.join(projectPath, 'package.json');
+  if (fs.existsSync(pkgPath)) {
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+    const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+    if (deps['pg'] || deps['@prisma/client'] && fs.existsSync(path.join(projectPath, 'prisma'))) return 'postgres';
+    if (deps['mysql'] || deps['mysql2']) return 'mysql';
+    if (deps['mongoose'] || deps['mongodb']) return null; // MongoDB = pas dans compose ici
+  }
+
+  // pom.xml
+  const pomPath = path.join(projectPath, 'pom.xml');
+  if (fs.existsSync(pomPath)) {
+    const pom = fs.readFileSync(pomPath, 'utf8');
+    if (pom.includes('postgresql')) return 'postgres';
+    return 'mysql';
+  }
+
+  // application.properties
+  const propsPath = path.join(projectPath, 'src/main/resources/application.properties');
+  if (fs.existsSync(propsPath)) {
+    const props = fs.readFileSync(propsPath, 'utf8');
+    if (props.includes('postgresql')) return 'postgres';
+    if (props.includes('mysql')) return 'mysql';
+  }
+
+  return 'mysql';
+}
+
+async function generateFiles(projectInfo, projectPath = process.cwd()) {
+  const { type, internalPort, hostPort } = projectInfo;
   const name = path.basename(projectPath);
 
-  // React Vite = toujours nginx sur port 80 en production
-  if (type === 'react-vite') port = 80;
+  // Détecter le type de DB
+  const dbType = detectDbType(projectPath);
 
-  // Next.js = toujours port 3000
-  if (type === 'nextjs') port = 3000;
-
+  // Dockerfile
   let dockerfile = dockerfiles[type] || dockerfiles.unknown;
 
-  // Express/Node: détecter le vrai fichier d'entrée
   if (type === 'express' || type === 'node' || type === 'unknown') {
     const entrypoint = detectEntrypoint(projectPath);
     dockerfile = dockerfile.replace('CMD ["node", "index.js"]', `CMD ["node", "${entrypoint}"]`);
-    dockerfile += `\nEXPOSE ${port}`;
-  } else if (type === 'react-vite') {
-    // Dockerfile react-vite a déjà EXPOSE 80
-  } else if (type === 'nextjs') {
-    // Dockerfile nextjs a déjà EXPOSE 3000
-  } else {
-    dockerfile += `\nEXPOSE ${port}`;
+    dockerfile += `\nEXPOSE ${internalPort}`;
+  } else if (type !== 'react-vite' && type !== 'angular' && type !== 'nextjs') {
+    dockerfile += `\nEXPOSE ${internalPort}`;
   }
 
   fs.writeFileSync(path.join(projectPath, 'Dockerfile'), dockerfile);
 
-  // docker-compose.yml selon le type
-  let compose = '';
-
-  if (type === 'springboot') {
-    compose = getCompose(name, port,
-      `environment:\n      - SPRING_DATASOURCE_URL=jdbc:mysql://db:3306/appdb\n      - SPRING_DATASOURCE_USERNAME=root\n      - SPRING_DATASOURCE_PASSWORD=root\n    `,
-      dbService
-    );
-  } else if (type === 'express' || type === 'nestjs') {
-    compose = getCompose(name, port,
-      `environment:\n      - NODE_ENV=production\n      - DATABASE_URL=mysql://root:root@db:3306/appdb\n    `,
-      dbService
-    );
-  } else if (type === 'laravel') {
-    compose = getCompose(name, port,
-      `environment:\n      - DB_HOST=db\n      - DB_PORT=3306\n      - DB_DATABASE=appdb\n      - DB_USERNAME=root\n      - DB_PASSWORD=root\n    `,
-      dbService
-    );
-  } else {
-    compose = getCompose(name, port);
+  // DB port libre aléatoire entre 15000-15999
+  const net = require('net');
+  let dbPort = 15000;
+  for (let p = 15000; p <= 15999; p++) {
+    const free = await new Promise((resolve) => {
+      const s = net.createServer();
+      s.once('error', () => resolve(false));
+      s.once('listening', () => { s.close(); resolve(true); });
+      s.listen(p);
+    });
+    if (free) { dbPort = p; break; }
   }
+
+  // Générer le compose
+  const frontendTypes = ['react-vite', 'angular', 'nextjs'];
+  const needsDb = !frontendTypes.includes(type);
+
+  let envBlock = '';
+  let dbBlock = '';
+
+  if (needsDb && dbType) {
+    const dbSvc = dbServices[dbType](dbPort);
+
+    if (type === 'springboot') {
+      const url = dbType === 'postgres'
+        ? `jdbc:postgresql://db:5432/appdb`
+        : `jdbc:mysql://db:3306/appdb`;
+      envBlock = `environment:
+      - SPRING_DATASOURCE_URL=${url}
+      - SPRING_DATASOURCE_USERNAME=root
+      - SPRING_DATASOURCE_PASSWORD=root
+    `;
+    } else if (type === 'express' || type === 'nestjs' || type === 'node') {
+      const url = dbType === 'postgres'
+        ? `postgresql://root:root@db:5432/appdb`
+        : `mysql://root:root@db:3306/appdb`;
+      envBlock = `environment:
+      - NODE_ENV=production
+      - DATABASE_URL=${url}
+    `;
+    } else if (type === 'laravel') {
+      envBlock = `environment:
+      - DB_HOST=db
+      - DB_PORT=${dbType === 'postgres' ? 5432 : 3306}
+      - DB_DATABASE=appdb
+      - DB_USERNAME=root
+      - DB_PASSWORD=root
+    `;
+    }
+
+    dbBlock = `\n${dbSvc}`;
+  }
+
+  const compose = `services:
+  ${name}:
+    build: .
+    ports:
+      - "${hostPort}:${internalPort}"
+    ${envBlock}${needsDb && dbType ? `depends_on:\n      - db\n    restart: unless-stopped` : `restart: unless-stopped`}${dbBlock}`;
 
   fs.writeFileSync(path.join(projectPath, 'docker-compose.yml'), compose);
 
   fs.writeFileSync(path.join(projectPath, '.dockerignore'),
     `node_modules\n.git\n.env\ndist\nbuild\n*.log\n.DS_Store`
   );
+
+  return { hostPort, internalPort, dbPort: needsDb && dbType ? dbPort : null };
 }
 
 module.exports = { generateFiles };

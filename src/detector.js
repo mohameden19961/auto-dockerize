@@ -1,8 +1,27 @@
 const fs = require('fs');
 const path = require('path');
+const net = require('net');
+
+function isPortFree(port) {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.once('error', () => resolve(false));
+    server.once('listening', () => {
+      server.close();
+      resolve(true);
+    });
+    server.listen(port);
+  });
+}
+
+async function findFreePort(start = 9000, end = 9999) {
+  for (let port = start; port <= end; port++) {
+    if (await isPortFree(port)) return port;
+  }
+  return start;
+}
 
 function detectPort(projectPath, defaultPort) {
-  // Spring Boot: lire application.properties
   const propsPath = path.join(projectPath, 'src/main/resources/application.properties');
   if (fs.existsSync(propsPath)) {
     const props = fs.readFileSync(propsPath, 'utf8');
@@ -10,7 +29,6 @@ function detectPort(projectPath, defaultPort) {
     if (match) return parseInt(match[1]);
   }
 
-  // Spring Boot: lire application.yml
   const ymlPath = path.join(projectPath, 'src/main/resources/application.yml');
   if (fs.existsSync(ymlPath)) {
     const yml = fs.readFileSync(ymlPath, 'utf8');
@@ -18,8 +36,7 @@ function detectPort(projectPath, defaultPort) {
     if (match) return parseInt(match[1]);
   }
 
-  // Node/Express/NestJS: lire index.js ou main.ts
-  const indexFiles = ['index.js', 'index.ts', 'src/main.ts', 'server.js'];
+  const indexFiles = ['index.js', 'index.ts', 'src/main.ts', 'server.js', 'app.js'];
   for (const file of indexFiles) {
     const filePath = path.join(projectPath, file);
     if (fs.existsSync(filePath)) {
@@ -29,7 +46,6 @@ function detectPort(projectPath, defaultPort) {
     }
   }
 
-  // .env
   const envPath = path.join(projectPath, '.env');
   if (fs.existsSync(envPath)) {
     const env = fs.readFileSync(envPath, 'utf8');
@@ -40,55 +56,61 @@ function detectPort(projectPath, defaultPort) {
   return defaultPort;
 }
 
-function detectProject(projectPath = process.cwd()) {
+async function detectProject(projectPath = process.cwd()) {
   const files = fs.readdirSync(projectPath);
 
   // Next.js
-  if (files.includes('next.config.js') || files.includes('next.config.ts')) {
-    const port = detectPort(projectPath, 3000);
-    return { type: 'nextjs', port };
+  if (files.includes('next.config.js') || files.includes('next.config.ts') || files.includes('next.config.mjs')) {
+    const internalPort = detectPort(projectPath, 3000);
+    const hostPort = await findFreePort();
+    return { type: 'nextjs', internalPort, hostPort };
+  }
+
+  // Angular
+  if (files.includes('angular.json')) {
+    const hostPort = await findFreePort();
+    return { type: 'angular', internalPort: 80, hostPort };
   }
 
   // React Vite
   if (files.includes('vite.config.js') || files.includes('vite.config.ts')) {
-    const port = detectPort(projectPath, 5173);
-    return { type: 'react-vite', port };
+    const hostPort = await findFreePort();
+    return { type: 'react-vite', internalPort: 80, hostPort };
   }
 
   // Spring Boot
   if (files.includes('pom.xml')) {
-    const port = detectPort(projectPath, 8080);
-    return { type: 'springboot', port };
+    const internalPort = detectPort(projectPath, 8080);
+    const hostPort = await findFreePort();
+    return { type: 'springboot', internalPort, hostPort };
+  }
+
+  // Laravel
+  if (files.includes('artisan')) {
+    const internalPort = detectPort(projectPath, 8000);
+    const hostPort = await findFreePort();
+    return { type: 'laravel', internalPort, hostPort };
   }
 
   // Node / Express / NestJS
   if (files.includes('package.json')) {
     const pkg = JSON.parse(fs.readFileSync(path.join(projectPath, 'package.json'), 'utf8'));
     const deps = { ...pkg.dependencies, ...pkg.devDependencies };
-    if (deps['@nestjs/core']) {
-      const port = detectPort(projectPath, 3000);
-      return { type: 'nestjs', port };
-    }
-    if (deps['express']) {
-      const port = detectPort(projectPath, 3000);
-      return { type: 'express', port };
-    }
-    const port = detectPort(projectPath, 3000);
-    return { type: 'node', port };
-  }
-
-  // Laravel
-  if (files.includes('artisan')) {
-    const port = detectPort(projectPath, 8000);
-    return { type: 'laravel', port };
+    const internalPort = detectPort(projectPath, 3000);
+    const hostPort = await findFreePort();
+    if (deps['@nestjs/core']) return { type: 'nestjs', internalPort, hostPort };
+    if (deps['express']) return { type: 'express', internalPort, hostPort };
+    return { type: 'node', internalPort, hostPort };
   }
 
   // Flutter
   if (files.includes('pubspec.yaml')) {
-    return { type: 'flutter', port: null };
+    return { type: 'flutter', internalPort: null, hostPort: null };
   }
 
-  return { type: 'unknown', port: detectPort(projectPath, 3000) };
+  const internalPort = detectPort(projectPath, 3000);
+  const hostPort = await findFreePort();
+  return { type: 'unknown', internalPort, hostPort };
 }
 
 module.exports = { detectProject };
