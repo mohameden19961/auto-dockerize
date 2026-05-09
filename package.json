@@ -14,9 +14,9 @@
   "license": "ISC",
   "publishConfig": {
     "registry": "https://npm.pkg.github.com"
-  }
+  },
   "repository": {
-  "type": "git",
-  "url": "https://github.com/mohameden19961/auto-dockerize.git"
-},
+    "type": "git",
+    "url": "https://github.com/mohameden19961/auto-dockerize.git"
+  }
 }
