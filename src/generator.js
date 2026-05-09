@@ -11,12 +11,11 @@ COPY . .
 RUN npm run build
 EXPOSE 3000
 CMD ["npm", "start"]`,
-    compose: (name) => `version: '3.8'
-services:
+    compose: (name) => `services:
   ${name}:
     build: .
     ports:
-      - "3000:3000"
+      - "13000:3000"
     environment:
       - NODE_ENV=production
     restart: unless-stopped`,
@@ -34,12 +33,11 @@ FROM nginx:alpine
 COPY --from=builder /app/dist /usr/share/nginx/html
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]`,
-    compose: (name) => `version: '3.8'
-services:
+    compose: (name) => `services:
   ${name}:
     build: .
     ports:
-      - "80:80"
+      - "10080:80"
     restart: unless-stopped`,
   },
 
@@ -51,12 +49,11 @@ RUN npm install --production
 COPY . .
 EXPOSE 3000
 CMD ["node", "index.js"]`,
-    compose: (name) => `version: '3.8'
-services:
+    compose: (name) => `services:
   ${name}:
     build: .
     ports:
-      - "3000:3000"
+      - "13001:3000"
     environment:
       - NODE_ENV=production
     restart: unless-stopped`,
@@ -71,12 +68,11 @@ COPY . .
 RUN npm run build
 EXPOSE 3000
 CMD ["node", "dist/main"]`,
-    compose: (name) => `version: '3.8'
-services:
+    compose: (name) => `services:
   ${name}:
     build: .
     ports:
-      - "3000:3000"
+      - "13002:3000"
     restart: unless-stopped`,
   },
 
@@ -92,12 +88,11 @@ WORKDIR /app
 COPY --from=builder /app/target/*.jar app.jar
 EXPOSE 8080
 CMD ["java", "-jar", "app.jar"]`,
-    compose: (name) => `version: '3.8'
-services:
+    compose: (name) => `services:
   ${name}:
     build: .
     ports:
-      - "8080:8080"
+      - "18080:8080"
     restart: unless-stopped`,
   },
 
@@ -110,12 +105,11 @@ RUN composer install --no-dev
 COPY . .
 EXPOSE 8000
 CMD ["php", "artisan", "serve", "--host=0.0.0.0"]`,
-    compose: (name) => `version: '3.8'
-services:
+    compose: (name) => `services:
   ${name}:
     build: .
     ports:
-      - "8000:8000"
+      - "18000:8000"
     restart: unless-stopped`,
   },
 
@@ -125,12 +119,11 @@ WORKDIR /app
 COPY . .
 EXPOSE 3000
 CMD ["node", "index.js"]`,
-    compose: (name) => `version: '3.8'
-services:
+    compose: (name) => `services:
   ${name}:
     build: .
     ports:
-      - "3000:3000"
+      - "19000:3000"
     restart: unless-stopped`,
   },
 };
@@ -139,13 +132,9 @@ function generateFiles(projectInfo, projectPath = process.cwd()) {
   const template = templates[projectInfo.type] || templates.unknown;
   const name = path.basename(projectPath);
 
-  // Dockerfile
   fs.writeFileSync(path.join(projectPath, 'Dockerfile'), template.dockerfile);
-
-  // docker-compose.yml
   fs.writeFileSync(path.join(projectPath, 'docker-compose.yml'), template.compose(name));
 
-  // .dockerignore
   const dockerignore = `node_modules
 .git
 .env
