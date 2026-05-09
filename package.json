@@ -1,6 +1,6 @@
 {
   "name": "@mohameden19961/auto-dockerize",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Auto-dockerize any project automatically",
   "main": "src/detector.js",
   "bin": {
