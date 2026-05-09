@@ -56,7 +56,24 @@ CMD ["node", "index.js"]`,
       - "13001:3000"
     environment:
       - NODE_ENV=production
-    restart: unless-stopped`,
+      - DATABASE_URL=mysql://root:root@db:3306/appdb
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  db:
+    image: mysql:8
+    ports:
+      - "13306:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=root
+      - MYSQL_DATABASE=appdb
+    volumes:
+      - db_data:/var/lib/mysql
+    restart: unless-stopped
+
+volumes:
+  db_data:`,
   },
 
   nestjs: {
@@ -73,7 +90,26 @@ CMD ["node", "dist/main"]`,
     build: .
     ports:
       - "13002:3000"
-    restart: unless-stopped`,
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=mysql://root:root@db:3306/appdb
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  db:
+    image: mysql:8
+    ports:
+      - "13306:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=root
+      - MYSQL_DATABASE=appdb
+    volumes:
+      - db_data:/var/lib/mysql
+    restart: unless-stopped
+
+volumes:
+  db_data:`,
   },
 
   springboot: {
@@ -93,7 +129,27 @@ CMD ["java", "-jar", "app.jar"]`,
     build: .
     ports:
       - "18080:8080"
-    restart: unless-stopped`,
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:mysql://db:3306/appdb
+      - SPRING_DATASOURCE_USERNAME=root
+      - SPRING_DATASOURCE_PASSWORD=root
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  db:
+    image: mysql:8
+    ports:
+      - "13306:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=root
+      - MYSQL_DATABASE=appdb
+    volumes:
+      - db_data:/var/lib/mysql
+    restart: unless-stopped
+
+volumes:
+  db_data:`,
   },
 
   laravel: {
@@ -110,7 +166,29 @@ CMD ["php", "artisan", "serve", "--host=0.0.0.0"]`,
     build: .
     ports:
       - "18000:8000"
-    restart: unless-stopped`,
+    environment:
+      - DB_HOST=db
+      - DB_PORT=3306
+      - DB_DATABASE=appdb
+      - DB_USERNAME=root
+      - DB_PASSWORD=root
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  db:
+    image: mysql:8
+    ports:
+      - "13306:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=root
+      - MYSQL_DATABASE=appdb
+    volumes:
+      - db_data:/var/lib/mysql
+    restart: unless-stopped
+
+volumes:
+  db_data:`,
   },
 
   unknown: {
