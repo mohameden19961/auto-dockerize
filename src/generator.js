@@ -2,7 +2,14 @@ const fs = require('fs');
 const path = require('path');
 
 function getHostPort(port) {
-  return 10000 + port;
+  // Ports bloqués par les navigateurs: 10080, 10443, etc.
+  // On utilise la plage 8000-9000 pour les frontends
+  const safePorts = {
+    80: 8080,    // react-vite nginx
+    3000: 13000, // nextjs
+    5173: 15173, // vite dev (non utilisé en prod)
+  };
+  return safePorts[port] || (10000 + port);
 }
 
 function getCompose(name, port, extraEnv = '', dbService = '') {
